@@ -20,14 +20,24 @@ jobs:
   github-metrics:
     runs-on: ubuntu-latest
     steps:
+      - name: Generate app token
+        # The GitHub App is added as a bypass actor in the branch protection
+        # ruleset, so its token can push directly to main where the default
+        # GITHUB_TOKEN (and github-actions[bot]) cannot.
+        uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Generate metrics
         uses: lowlighter/metrics@latest
         with:
-          # A personal access token must be stored as the GH_TOKEN secret.
-          # Create one at https://github.com/settings/tokens with the
-          # `repo` and `read:user` scopes, then add it under
-          # Settings → Secrets and variables → Actions.
+          # GH_TOKEN is a PAT used only for reading GitHub data (activity,
+          # languages, etc.). The app token is used for committing so that
+          # branch protection bypass applies.
           token: ${{ secrets.GH_TOKEN }}
+          committer_token: ${{ steps.app-token.outputs.token }}
           user: hydn-n
           filename: github-metrics.svg
 
@@ -74,10 +84,18 @@ jobs:
     # Only run on non-PR events (schedule, dispatch, push to main)
     if: github.event_name != 'pull_request'
     steps:
+      - name: Generate app token
+        uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
-          # Use GH_TOKEN so the commit can trigger downstream workflows if needed
-          token: ${{ secrets.GH_TOKEN }}
+          # App token used for checkout so the remote URL is pre-authenticated
+          # for the subsequent push, which needs bypass access to main.
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Fetch 30-day commit and PR counts
         env:
