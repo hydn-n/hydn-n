@@ -15,26 +15,30 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   github-metrics:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+
       - name: Generate metrics
         uses: lowlighter/metrics@latest
         with:
           # A personal access token must be stored as the GH_TOKEN secret.
           # Create one at https://github.com/settings/tokens with the
           # `repo` and `read:user` scopes, then add it under
-          # Settings → Secrets and variables → Actions.
+          # Settings > Secrets and variables > Actions.
           token: ${{ secrets.GH_TOKEN }}
           user: hydn-n
           filename: github-metrics.svg
 
-          # On pull requests, only render the SVG (don't commit it) so it can be
-          # previewed via the artifact uploaded below. On main / schedule /
-          # dispatch, commit the regenerated image back to the repo.
-          output_action: ${{ github.event_name == 'pull_request' && 'none' || 'commit' }}
+          # Always render without committing - we use create-pull-request
+          # on non-PR events to satisfy branch protection rules.
+          output_action: none
 
           # Layout
           template: classic
@@ -45,28 +49,33 @@ jobs:
           plugin_isocalendar: yes
           plugin_isocalendar_duration: half-year
 
-          # Most used languages — repo byte-count mode (default).
-          # `indepth` mode requires visible push events to find repos to clone,
-          # which doesn't work when activity is mostly in private/org repos.
-          # The `ignored` list filters out notebook/markup noise.
+          # Most used languages
           plugin_languages: yes
           plugin_languages_details: bytes-size, percentage
           plugin_languages_ignored: jupyter notebook, html, css
 
-      - name: Stage preview render
-        # On PRs the SVG is written to /metrics_renders/ (output_action: none),
-        # owned by root, so copy it into the workspace before uploading.
-        if: github.event_name == 'pull_request'
-        run: sudo cp /metrics_renders/github-metrics.svg ./github-metrics-preview.svg
+      - name: Copy rendered SVG into workspace
+        run: sudo cp /metrics_renders/github-metrics.svg ./github-metrics.svg
+
+      - name: Create or update metrics PR
+        # On non-PR events, open a PR to update the SVG (bypasses branch protection)
+        if: github.event_name != 'pull_request'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          commit-message: "chore: update github-metrics.svg [skip ci]"
+          branch: auto/update-metrics
+          title: "chore: update github-metrics.svg"
+          body: "Automated metrics SVG refresh."
+          delete-branch: true
 
       - name: Upload preview artifact
-        # Only on PRs — download this from the run's "Artifacts" section to
-        # preview the rendered image before merging.
+        # Only on PRs - download from the run Artifacts section to preview.
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: github-metrics-preview
-          path: github-metrics-preview.svg
+          path: github-metrics.svg
           if-no-files-found: error
 
   stats-30d:
@@ -76,7 +85,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Use GH_TOKEN so the commit can trigger downstream workflows if needed
           token: ${{ secrets.GH_TOKEN }}
 
       - name: Fetch 30-day commit and PR counts
@@ -100,17 +108,12 @@ jobs:
           echo "{\"commits_30d\": $COMMITS, \"prs_30d\": $PRS}" > github-30d-stats.json
           cat github-30d-stats.json
 
-      - name: Commit stats
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Save the freshly computed stats, then reset to remote HEAD
-          # (the metrics job may have committed the SVG since we checked out),
-          # restore the stats file, and push.
-          STATS=$(cat github-30d-stats.json)
-          git fetch --depth=1 origin "$GITHUB_REF_NAME"
-          git reset --hard FETCH_HEAD
-          echo "$STATS" > github-30d-stats.json
-          git add github-30d-stats.json
-          git diff --cached --quiet || git commit -m "chore: update 30-day stats [skip ci]"
-          git push origin "$GITHUB_REF_NAME"
+      - name: Create or update stats PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          commit-message: "chore: update 30-day stats [skip ci]"
+          branch: auto/update-30d-stats
+          title: "chore: update 30-day stats"
+          body: "Automated 30-day activity stats refresh."
+          delete-branch: true
