@@ -1,16 +1,25 @@
 ## Hi there 👋
 
-<!--
-**hydn-n/hydn-n** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+<br>
 
-Here are some ideas to get you started:
+## 📊 My GitHub Stats
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+<p align="center">
+  <img
+    src="https://github-readme-stats.vercel.app/api?username=hydn-n&show_icons=true&count_private=true&include_all_commits=true&theme=default&hide_border=true"
+    alt="hydn-n's GitHub Stats"
+    height="180"
+  />
+  <img
+    src="https://github-readme-stats.vercel.app/api/top-langs/?username=hydn-n&layout=compact&theme=default&hide_border=true"
+    alt="Top Languages"
+    height="180"
+  />
+</p>
+
+<p align="center">
+  <img
+    src="https://streak-stats.demolab.com?user=hydn-n&theme=default&hide_border=true"
+    alt="GitHub Streak"
+  />
+</p>
