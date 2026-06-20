@@ -1,0 +1,116 @@
+name: Metrics
+
+on:
+  # Rebuild the metrics image every day at 00:00 UTC
+  schedule:
+    - cron: "0 0 * * *"
+  # Allow manual runs from the Actions tab (only once on the default branch)
+  workflow_dispatch:
+  # Refresh and commit the image on pushes to the default branch
+  push:
+    branches: ["main"]
+  # Render a preview (uploaded as an artifact, not committed) for pull requests
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  github-metrics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate metrics
+        uses: lowlighter/metrics@latest
+        with:
+          # A personal access token must be stored as the GH_TOKEN secret.
+          # Create one at https://github.com/settings/tokens with the
+          # `repo` and `read:user` scopes, then add it under
+          # Settings → Secrets and variables → Actions.
+          token: ${{ secrets.GH_TOKEN }}
+          user: hydn-n
+          filename: github-metrics.svg
+
+          # On pull requests, only render the SVG (don't commit it) so it can be
+          # previewed via the artifact uploaded below. On main / schedule /
+          # dispatch, commit the regenerated image back to the repo.
+          output_action: ${{ github.event_name == 'pull_request' && 'none' || 'commit' }}
+
+          # Layout
+          template: classic
+          base: header, metadata
+          config_timezone: America/Toronto
+
+          # Recent commit activity as an isometric calendar
+          plugin_isocalendar: yes
+          plugin_isocalendar_duration: half-year
+
+          # Most used languages — repo byte-count mode (default).
+          # `indepth` mode requires visible push events to find repos to clone,
+          # which doesn't work when activity is mostly in private/org repos.
+          # The `ignored` list filters out notebook/markup noise.
+          plugin_languages: yes
+          plugin_languages_details: bytes-size, percentage
+          plugin_languages_ignored: jupyter notebook, html, css
+
+      - name: Stage preview render
+        # On PRs the SVG is written to /metrics_renders/ (output_action: none),
+        # owned by root, so copy it into the workspace before uploading.
+        if: github.event_name == 'pull_request'
+        run: sudo cp /metrics_renders/github-metrics.svg ./github-metrics-preview.svg
+
+      - name: Upload preview artifact
+        # Only on PRs — download this from the run's "Artifacts" section to
+        # preview the rendered image before merging.
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-metrics-preview
+          path: github-metrics-preview.svg
+          if-no-files-found: error
+
+  stats-30d:
+    runs-on: ubuntu-latest
+    # Only run on non-PR events (schedule, dispatch, push to main)
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Use GH_TOKEN so the commit can trigger downstream workflows if needed
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Fetch 30-day commit and PR counts
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          SINCE=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)
+
+          COMMITS=$(curl -sS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/search/commits?q=author:hydn-n+committer-date:>$SINCE&per_page=1" \
+            | jq '.total_count')
+
+          PRS=$(curl -sS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/search/issues?q=type:pr+author:hydn-n+created:>$SINCE&per_page=1" \
+            | jq '.total_count')
+
+          echo "{\"commits_30d\": $COMMITS, \"prs_30d\": $PRS}" > github-30d-stats.json
+          cat github-30d-stats.json
+
+      - name: Commit stats
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Save the freshly computed stats, then reset to remote HEAD
+          # (the metrics job may have committed the SVG since we checked out),
+          # restore the stats file, and push.
+          STATS=$(cat github-30d-stats.json)
+          git fetch --depth=1 origin "$GITHUB_REF_NAME"
+          git reset --hard FETCH_HEAD
+          echo "$STATS" > github-30d-stats.json
+          git add github-30d-stats.json
+          git diff --cached --quiet || git commit -m "chore: update 30-day stats [skip ci]"
+          git push origin "$GITHUB_REF_NAME"
